@@ -1,1 +1,2848 @@
+# ================================================================
+# BANDUNG DEMOGRAPHIC ATLAS 2024
+# FINAL PROFESSIONAL GIS PORTFOLIO DASHBOARD
+#
+# FEATURES:
+# - Google Satellite
+# - Light Map
+# - OpenStreetMap
+# - Fullscreen
+# - Search Desa/Kelurahan
+# - Interactive Legend
+# - Hover Information
+# - Detailed Popup Statistics
+# - Population Density Map
+# - Top 10 Density Ranking
+# - Gender Composition
+# - Population Trend 2020-2024
+#
+# ONE CELL / ONE RUN
+# ================================================================
 
+
+# ================================================================
+# 1. INSTALL
+# ================================================================
+
+!pip -q install geopandas folium branca matplotlib
+
+
+# ================================================================
+# 2. IMPORT
+# ================================================================
+
+import geopandas as gpd
+import pandas as pd
+import numpy as np
+import folium
+import html
+import os
+import json
+
+from google.colab import files
+from IPython.display import display, HTML
+
+from folium.plugins import Fullscreen, Search
+
+
+print("=" * 75)
+print(" BANDUNG DEMOGRAPHIC ATLAS 2024")
+print(" PROFESSIONAL GIS PORTFOLIO DASHBOARD")
+print("=" * 75)
+
+
+# ================================================================
+# 3. UPLOAD GEOJSON
+# ================================================================
+
+print("\n[1/12] Upload GeoJSON...")
+
+uploaded = files.upload()
+
+geojson_file = None
+
+for filename in uploaded.keys():
+
+    if filename.lower().endswith(".geojson"):
+
+        geojson_file = filename
+
+        break
+
+
+if geojson_file is None:
+
+    raise Exception(
+        "❌ File GeoJSON tidak ditemukan."
+    )
+
+
+print("✓ File:", geojson_file)
+
+
+# ================================================================
+# 4. READ GEOJSON
+# ================================================================
+
+print("\n[2/12] Membaca dataset...")
+
+gdf = gpd.read_file(
+    geojson_file
+)
+
+
+print("✓ Jumlah wilayah :", len(gdf))
+print("✓ CRS            :", gdf.crs)
+print("✓ Jumlah kolom   :", len(gdf.columns))
+
+
+# ================================================================
+# 5. FIND COLUMN
+# ================================================================
+
+def find_column(keyword):
+
+    keyword = keyword.upper()
+
+    for col in gdf.columns:
+
+        if keyword in str(col).upper():
+
+            return col
+
+    return None
+
+
+def numeric_column(keyword):
+
+    col = find_column(keyword)
+
+    if col is not None:
+
+        gdf[col] = pd.to_numeric(
+            gdf[col],
+            errors="coerce"
+        )
+
+    return col
+
+
+# ================================================================
+# IDENTIFY FIELDS
+# ================================================================
+
+COL_DESA = find_column(
+    "DESA"
+)
+
+COL_KEC = find_column(
+    "KECAMATAN"
+)
+
+COL_POP20 = numeric_column(
+    "JUMLAH PENDUDUK 2020"
+)
+
+COL_POP21 = numeric_column(
+    "JUMLAH PENDUDUK 2021"
+)
+
+COL_POP22 = numeric_column(
+    "JUMLAH PENDUDUK 2022"
+)
+
+COL_POP23 = numeric_column(
+    "JUMLAH PENDUDUK 2023"
+)
+
+COL_POP24 = numeric_column(
+    "JUMLAH PENDUDUK 2024"
+)
+
+COL_DENSITY = numeric_column(
+    "KEPADATAN PENDUDUK 2024"
+)
+
+COL_AREA = numeric_column(
+    "LUAS WILAYAH"
+)
+
+COL_KK = numeric_column(
+    "JUMLAH KK"
+)
+
+COL_MALE = numeric_column(
+    "LAKI-LAKI"
+)
+
+COL_FEMALE = numeric_column(
+    "PEREMPUAN"
+)
+
+COL_GROWTH = numeric_column(
+    "PERTUMBUHAN PENDUDUK 2020-2024"
+)
+
+
+print("\n✓ FIELD TERDETEKSI")
+print("-" * 50)
+
+print("Desa/Kelurahan :", COL_DESA)
+print("Kecamatan      :", COL_KEC)
+print("Penduduk 2024  :", COL_POP24)
+print("Kepadatan 2024 :", COL_DENSITY)
+print("Luas wilayah   :", COL_AREA)
+print("Jumlah KK      :", COL_KK)
+print("Laki-laki      :", COL_MALE)
+print("Perempuan      :", COL_FEMALE)
+print("Pertumbuhan    :", COL_GROWTH)
+
+
+# ================================================================
+# 6. VALIDATION
+# ================================================================
+
+required = {
+
+    "DESA": COL_DESA,
+
+    "KECAMATAN": COL_KEC,
+
+    "JUMLAH PENDUDUK 2024":
+        COL_POP24,
+
+    "KEPADATAN PENDUDUK 2024":
+        COL_DENSITY
+
+}
+
+
+missing = [
+
+    key
+
+    for key, value
+    in required.items()
+
+    if value is None
+
+]
+
+
+if missing:
+
+    raise Exception(
+        "❌ Field penting tidak ditemukan:\n"
+        +
+        "\n".join(missing)
+    )
+
+
+# ================================================================
+# 7. STANDARDIZE DATA
+# ================================================================
+
+print("\n[3/12] Standardisasi data...")
+
+
+gdf["DESA_NAME"] = (
+
+    gdf[COL_DESA]
+
+    .fillna("-")
+
+    .astype(str)
+
+)
+
+
+gdf["KEC_NAME"] = (
+
+    gdf[COL_KEC]
+
+    .fillna("-")
+
+    .astype(str)
+
+)
+
+
+gdf["POP_2024"] = (
+
+    gdf[COL_POP24]
+
+    .fillna(0)
+
+)
+
+
+gdf["DENSITY_2024"] = (
+
+    gdf[COL_DENSITY]
+
+    .fillna(0)
+
+)
+
+
+# ------------------------------------------------
+# Historical Population
+# ------------------------------------------------
+
+for year, col in [
+
+    (2020, COL_POP20),
+
+    (2021, COL_POP21),
+
+    (2022, COL_POP22),
+
+    (2023, COL_POP23)
+
+]:
+
+    if col is not None:
+
+        gdf[
+            f"POP_{year}"
+        ] = (
+
+            gdf[col]
+
+            .fillna(0)
+
+        )
+
+    else:
+
+        gdf[
+            f"POP_{year}"
+        ] = 0
+
+
+# ------------------------------------------------
+# Household
+# ------------------------------------------------
+
+if COL_KK:
+
+    gdf["KK"] = (
+        gdf[COL_KK]
+        .fillna(0)
+    )
+
+else:
+
+    gdf["KK"] = 0
+
+
+# ------------------------------------------------
+# Gender
+# ------------------------------------------------
+
+if COL_MALE:
+
+    gdf["MALE"] = (
+        gdf[COL_MALE]
+        .fillna(0)
+    )
+
+else:
+
+    gdf["MALE"] = 0
+
+
+if COL_FEMALE:
+
+    gdf["FEMALE"] = (
+        gdf[COL_FEMALE]
+        .fillna(0)
+    )
+
+else:
+
+    gdf["FEMALE"] = 0
+
+
+# ------------------------------------------------
+# Growth
+# ------------------------------------------------
+
+if COL_GROWTH:
+
+    gdf["GROWTH"] = (
+
+        gdf[COL_GROWTH]
+
+        .fillna(0)
+
+    )
+
+else:
+
+    gdf["GROWTH"] = np.where(
+
+        gdf["POP_2020"] > 0,
+
+        (
+
+            (
+                gdf["POP_2024"]
+                -
+                gdf["POP_2020"]
+            )
+            /
+            gdf["POP_2020"]
+
+        ) * 100,
+
+        0
+
+    )
+
+
+# ================================================================
+# 8. CRS
+# ================================================================
+
+print("\n[4/12] Menyiapkan CRS...")
+
+if gdf.crs is None:
+
+    gdf = gdf.set_crs(
+        epsg=4326
+    )
+
+
+gdf = gdf.to_crs(
+    epsg=4326
+)
+
+
+print("✓ CRS:", gdf.crs)
+
+
+# ================================================================
+# 9. STATISTICS
+# ================================================================
+
+print("\n[5/12] Menghitung statistik...")
+
+
+TOTAL_POP = (
+    gdf["POP_2024"]
+    .sum()
+)
+
+
+TOTAL_KK = (
+    gdf["KK"]
+    .sum()
+)
+
+
+AVG_DENSITY = (
+
+    gdf["DENSITY_2024"]
+
+    .replace(
+        [np.inf, -np.inf],
+        np.nan
+    )
+
+    .mean()
+
+)
+
+
+AVG_GROWTH = (
+
+    gdf["GROWTH"]
+
+    .replace(
+        [np.inf, -np.inf],
+        np.nan
+    )
+
+    .mean()
+
+)
+
+
+TOTAL_MALE = (
+    gdf["MALE"]
+    .sum()
+)
+
+
+TOTAL_FEMALE = (
+    gdf["FEMALE"]
+    .sum()
+)
+
+
+if TOTAL_POP > 0:
+
+    MALE_PERCENT = (
+        TOTAL_MALE
+        /
+        TOTAL_POP
+        *
+        100
+    )
+
+    FEMALE_PERCENT = (
+        TOTAL_FEMALE
+        /
+        TOTAL_POP
+        *
+        100
+    )
+
+else:
+
+    MALE_PERCENT = 0
+    FEMALE_PERCENT = 0
+
+
+# ================================================================
+# 10. TOP 10
+# ================================================================
+
+print("\n[6/12] Membuat ranking...")
+
+
+top10 = (
+
+    gdf[
+
+        [
+
+            "DESA_NAME",
+
+            "KEC_NAME",
+
+            "POP_2024",
+
+            "DENSITY_2024"
+
+        ]
+
+    ]
+
+    .sort_values(
+
+        "DENSITY_2024",
+
+        ascending=False
+
+    )
+
+    .head(10)
+
+    .reset_index(drop=True)
+
+)
+
+
+top10_html = ""
+
+
+for i, row in top10.iterrows():
+
+    desa = html.escape(
+        str(row["DESA_NAME"])
+    )
+
+    kec = html.escape(
+        str(row["KEC_NAME"])
+    )
+
+    top10_html += f"""
+
+    <div class="rank-item">
+
+        <div class="rank-number">
+            {i+1}
+        </div>
+
+        <div class="rank-info">
+
+            <div class="rank-desa">
+                {desa}
+            </div>
+
+            <div class="rank-kec">
+                {kec}
+            </div>
+
+        </div>
+
+        <div class="rank-density">
+
+            {row["DENSITY_2024"]:,.0f}
+
+            <small>
+                jiwa/km²
+            </small>
+
+        </div>
+
+    </div>
+
+    """
+
+
+# ================================================================
+# 11. MAP CENTER
+# ================================================================
+
+print("\n[7/12] Membuat peta...")
+
+
+# Use representative point for stable map center
+center = (
+    gdf.geometry
+    .unary_union
+    .representative_point()
+)
+
+
+MAP_LAT = center.y
+MAP_LON = center.x
+
+
+# ================================================================
+# 12. CREATE FOLIUM MAP
+# ================================================================
+
+m = folium.Map(
+
+    location=[
+        MAP_LAT,
+        MAP_LON
+    ],
+
+    zoom_start=11,
+
+    tiles=None,
+
+    control_scale=True
+
+)
+
+
+# ================================================================
+# BASEMAP 1 — LIGHT
+# ================================================================
+
+folium.TileLayer(
+
+    tiles="CartoDB positron",
+
+    name="Light Map",
+
+    control=True,
+
+    overlay=False
+
+).add_to(m)
+
+
+# ================================================================
+# BASEMAP 2 — OSM
+# ================================================================
+
+folium.TileLayer(
+
+    tiles="OpenStreetMap",
+
+    name="OpenStreetMap",
+
+    control=True,
+
+    overlay=False
+
+).add_to(m)
+
+
+# ================================================================
+# BASEMAP 3 — GOOGLE SATELLITE
+# ================================================================
+
+folium.TileLayer(
+
+    tiles=
+        "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+
+    attr=
+        "Google Satellite",
+
+    name="Google Satellite",
+
+    control=True,
+
+    overlay=False,
+
+    max_zoom=20
+
+).add_to(m)
+
+
+# ================================================================
+# DENSITY RANGE
+# ================================================================
+
+values = (
+
+    gdf["DENSITY_2024"]
+
+    .replace(
+        [np.inf, -np.inf],
+        np.nan
+    )
+
+    .fillna(0)
+
+)
+
+
+vmin = float(
+    values.min()
+)
+
+vmax = float(
+    values.max()
+)
+
+
+if vmax <= vmin:
+
+    vmax = vmin + 1
+
+
+colors = [
+
+    "#f7fbff",
+
+    "#deebf7",
+
+    "#c6dbef",
+
+    "#9ecae1",
+
+    "#6baed6",
+
+    "#4292c6",
+
+    "#2171b5",
+
+    "#08519c",
+
+    "#08306b"
+
+]
+
+
+def get_color(value):
+
+    try:
+
+        value = float(
+            value
+        )
+
+    except:
+
+        value = 0
+
+
+    ratio = (
+
+        value - vmin
+
+    ) / (
+
+        vmax - vmin
+
+    )
+
+
+    ratio = max(
+        0,
+        min(1, ratio)
+    )
+
+
+    index = int(
+
+        ratio
+        *
+        (len(colors)-1)
+
+    )
+
+
+    return colors[index]
+
+
+# ================================================================
+# STYLE
+# ================================================================
+
+def style_function(feature):
+
+    value = (
+
+        feature["properties"]
+
+        .get(
+            "DENSITY_2024",
+            0
+        )
+
+    )
+
+    return {
+
+        "fillColor":
+            get_color(value),
+
+        "color":
+            "#374151",
+
+        "weight":
+            0.7,
+
+        "fillOpacity":
+            0.78
+
+    }
+
+
+def highlight_function(feature):
+
+    return {
+
+        "weight":
+            3,
+
+        "color":
+            "#111827",
+
+        "fillOpacity":
+            0.92
+
+    }
+
+
+# ================================================================
+# GEOJSON LAYER
+# ================================================================
+
+geojson = folium.GeoJson(
+
+    gdf.to_json(),
+
+    name=
+        "Population Density 2024",
+
+    style_function=
+        style_function,
+
+    highlight_function=
+        highlight_function
+
+)
+
+
+# ================================================================
+# POPUP
+# ================================================================
+
+for feature in geojson.data["features"]:
+
+    props = feature["properties"]
+
+    desa = html.escape(
+        str(
+            props.get(
+                "DESA_NAME",
+                "-"
+            )
+        )
+    )
+
+    kec = html.escape(
+        str(
+            props.get(
+                "KEC_NAME",
+                "-"
+            )
+        )
+    )
+
+    pop = float(
+        props.get(
+            "POP_2024",
+            0
+        ) or 0
+    )
+
+    density = float(
+        props.get(
+            "DENSITY_2024",
+            0
+        ) or 0
+    )
+
+    kk = float(
+        props.get(
+            "KK",
+            0
+        ) or 0
+    )
+
+    growth = float(
+        props.get(
+            "GROWTH",
+            0
+        ) or 0
+    )
+
+    male = float(
+        props.get(
+            "MALE",
+            0
+        ) or 0
+    )
+
+    female = float(
+        props.get(
+            "FEMALE",
+            0
+        ) or 0
+    )
+
+
+    popup_html = f"""
+
+    <div style="
+        width:300px;
+        font-family:Arial;
+        color:#111827;
+    ">
+
+        <div style="
+            background:#0f172a;
+            color:white;
+            padding:14px;
+            margin:-1px -1px 12px -1px;
+            border-radius:8px 8px 0 0;
+        ">
+
+            <div style="
+                font-size:16px;
+                font-weight:700;
+            ">
+
+                {desa}
+
+            </div>
+
+            <div style="
+                font-size:11px;
+                color:#cbd5e1;
+                margin-top:4px;
+            ">
+
+                Kecamatan {kec}
+
+            </div>
+
+        </div>
+
+
+        <div style="
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:8px;
+        ">
+
+
+            <div style="
+                background:#f8fafc;
+                padding:10px;
+                border-radius:7px;
+            ">
+
+                <div style="
+                    color:#64748b;
+                    font-size:10px;
+                ">
+
+                    PENDUDUK
+
+                </div>
+
+                <div style="
+                    font-weight:700;
+                    font-size:16px;
+                    margin-top:3px;
+                ">
+
+                    {pop:,.0f}
+
+                </div>
+
+            </div>
+
+
+            <div style="
+                background:#f8fafc;
+                padding:10px;
+                border-radius:7px;
+            ">
+
+                <div style="
+                    color:#64748b;
+                    font-size:10px;
+                ">
+
+                    KEPADATAN
+
+                </div>
+
+                <div style="
+                    font-weight:700;
+                    font-size:16px;
+                    margin-top:3px;
+                ">
+
+                    {density:,.0f}
+
+                </div>
+
+            </div>
+
+
+            <div style="
+                background:#f8fafc;
+                padding:10px;
+                border-radius:7px;
+            ">
+
+                <div style="
+                    color:#64748b;
+                    font-size:10px;
+                ">
+
+                    JUMLAH KK
+
+                </div>
+
+                <div style="
+                    font-weight:700;
+                    font-size:16px;
+                    margin-top:3px;
+                ">
+
+                    {kk:,.0f}
+
+                </div>
+
+            </div>
+
+
+            <div style="
+                background:#f8fafc;
+                padding:10px;
+                border-radius:7px;
+            ">
+
+                <div style="
+                    color:#64748b;
+                    font-size:10px;
+                ">
+
+                    PERTUMBUHAN
+
+                </div>
+
+                <div style="
+                    font-weight:700;
+                    font-size:16px;
+                    margin-top:3px;
+                ">
+
+                    {growth:.2f}%
+
+                </div>
+
+            </div>
+
+
+        </div>
+
+
+        <div style="
+            margin-top:12px;
+            padding-top:10px;
+            border-top:1px solid #e5e7eb;
+        ">
+
+            <div style="
+                font-size:11px;
+                color:#64748b;
+                margin-bottom:6px;
+            ">
+
+                KOMPOSISI GENDER
+
+            </div>
+
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                font-size:11px;
+            ">
+
+                <span>
+                    Laki-laki
+                </span>
+
+                <b>
+                    {male:,.0f}
+                </b>
+
+            </div>
+
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                font-size:11px;
+                margin-top:4px;
+            ">
+
+                <span>
+                    Perempuan
+                </span>
+
+                <b>
+                    {female:,.0f}
+                </b>
+
+            </div>
+
+
+        </div>
+
+
+        <div style="
+            margin-top:12px;
+            font-size:9px;
+            color:#94a3b8;
+        ">
+
+            Data Demografi 2024
+
+        </div>
+
+
+    </div>
+
+    """
+
+
+    popup = folium.Popup(
+
+        popup_html,
+
+        max_width=350
+
+    )
+
+
+    # create geometry layer popup
+    # popup is attached after layer creation below
+
+
+    feature["properties"]["POPUP_HTML"] = popup_html
+
+
+# ================================================================
+# ADD GEOJSON WITH POPUP + TOOLTIP
+# ================================================================
+
+geojson = folium.GeoJson(
+
+    gdf.to_json(),
+
+    name=
+        "Population Density 2024",
+
+    style_function=
+        style_function,
+
+    highlight_function=
+        highlight_function,
+
+    tooltip=folium.GeoJsonTooltip(
+
+        fields=[
+
+            "DESA_NAME",
+
+            "KEC_NAME",
+
+            "POP_2024",
+
+            "DENSITY_2024"
+
+        ],
+
+        aliases=[
+
+            "Desa/Kelurahan",
+
+            "Kecamatan",
+
+            "Penduduk 2024",
+
+            "Kepadatan"
+
+        ],
+
+        localize=True,
+
+        sticky=False,
+
+        labels=True,
+
+        style="""
+
+        background-color:white;
+
+        color:#111827;
+
+        font-family:Arial;
+
+        font-size:12px;
+
+        padding:8px;
+
+        border-radius:7px;
+
+        """
+
+    )
+
+)
+
+
+# ================================================================
+# ATTACH POPUP
+# ================================================================
+
+for feature in geojson.data["features"]:
+
+    popup_html = feature[
+        "properties"
+    ].get(
+        "POPUP_HTML",
+        ""
+    )
+
+    folium.Popup(
+        popup_html,
+        max_width=350
+    ).add_to(
+        folium.GeoJson(
+            {
+                "type":
+                    "FeatureCollection",
+
+                "features":
+                    [feature]
+            },
+
+            style_function=
+                style_function,
+
+            highlight_function=
+                highlight_function
+
+        )
+    )
+
+
+# ------------------------------------------------
+# IMPORTANT:
+# Use a single GeoJson layer with popup binding
+# ------------------------------------------------
+
+# Rebuild clean layer using on_each_feature
+
+def on_each_feature(
+    feature,
+    layer
+):
+
+    popup_html = (
+        feature["properties"]
+        .get(
+            "POPUP_HTML",
+            ""
+        )
+    )
+
+    layer.bindPopup(
+        popup_html,
+        maxWidth=350
+    )
+
+
+geojson = folium.GeoJson(
+
+    gdf.to_json(),
+
+    name=
+        "Population Density 2024",
+
+    style_function=
+        style_function,
+
+    highlight_function=
+        highlight_function,
+
+    tooltip=folium.GeoJsonTooltip(
+
+        fields=[
+
+            "DESA_NAME",
+
+            "KEC_NAME",
+
+            "POP_2024",
+
+            "DENSITY_2024"
+
+        ],
+
+        aliases=[
+
+            "Desa/Kelurahan",
+
+            "Kecamatan",
+
+            "Penduduk 2024",
+
+            "Kepadatan"
+
+        ],
+
+        localize=True,
+
+        sticky=False,
+
+        labels=True
+
+    ),
+
+    popup=folium.GeoJsonPopup(
+
+        fields=[
+            "DESA_NAME",
+            "KEC_NAME",
+            "POP_2024",
+            "DENSITY_2024",
+            "KK",
+            "GROWTH",
+            "MALE",
+            "FEMALE"
+        ],
+
+        aliases=[
+            "Desa/Kelurahan",
+            "Kecamatan",
+            "Penduduk 2024",
+            "Kepadatan",
+            "Jumlah KK",
+            "Pertumbuhan (%)",
+            "Laki-laki",
+            "Perempuan"
+        ],
+
+        localize=True,
+
+        labels=True,
+
+        sticky=False
+
+    )
+
+)
+
+geojson.add_to(m)
+
+
+# ================================================================
+# SEARCH
+# ================================================================
+
+print("\n[8/12] Menambahkan search lokasi...")
+
+
+Search(
+
+    layer=geojson,
+
+    geom_type="Polygon",
+
+    placeholder=
+        "Cari Desa/Kelurahan...",
+
+    collapsed=False,
+
+    search_label=
+        "DESA_NAME",
+
+    position=
+        "topright"
+
+).add_to(m)
+
+
+# ================================================================
+# FULLSCREEN
+# ================================================================
+
+Fullscreen(
+
+    position="topright",
+
+    title="Full Screen",
+
+    title_cancel="Exit Full Screen",
+
+    force_separate_button=True
+
+).add_to(m)
+
+
+# ================================================================
+# LEGEND
+# ================================================================
+
+legend_html = f"""
+
+<div style="
+position:fixed;
+
+bottom:25px;
+
+left:25px;
+
+z-index:9999;
+
+background:white;
+
+padding:14px 16px;
+
+width:215px;
+
+border-radius:10px;
+
+box-shadow:
+0 3px 15px
+rgba(0,0,0,.20);
+
+font-family:Arial;
+
+">
+
+<div style="
+font-weight:700;
+font-size:13px;
+margin-bottom:10px;
+">
+
+Kepadatan Penduduk 2024
+
+</div>
+
+
+<div style="
+height:11px;
+
+border-radius:8px;
+
+background:
+linear-gradient(
+to right,
+#f7fbff,
+#deebf7,
+#c6dbef,
+#9ecae1,
+#6baed6,
+#4292c6,
+#2171b5,
+#08519c,
+#08306b
+);
+
+"></div>
+
+
+<div style="
+display:flex;
+justify-content:space-between;
+margin-top:5px;
+
+font-size:10px;
+
+color:#475569;
+">
+
+<span>
+{vmin:,.0f}
+</span>
+
+<span>
+{vmax:,.0f}
+</span>
+
+</div>
+
+
+<div style="
+margin-top:4px;
+font-size:9px;
+color:#94a3b8;
+">
+
+jiwa/km²
+
+</div>
+
+
+</div>
+
+"""
+
+
+m.get_root().html.add_child(
+
+    folium.Element(
+        legend_html
+    )
+
+)
+
+
+# ================================================================
+# LAYER CONTROL
+# ================================================================
+
+folium.LayerControl(
+
+    position="topright",
+
+    collapsed=False
+
+).add_to(m)
+
+
+# ================================================================
+# FIT MAP
+# ================================================================
+
+bounds = gdf.total_bounds
+
+
+m.fit_bounds(
+
+    [
+
+        [
+            bounds[1],
+            bounds[0]
+        ],
+
+        [
+            bounds[3],
+            bounds[2]
+        ]
+
+    ]
+
+)
+
+
+# ================================================================
+# 13. POPULATION TREND
+# ================================================================
+
+print("\n[9/12] Membuat statistik...")
+
+
+years = [
+    2020,
+    2021,
+    2022,
+    2023,
+    2024
+]
+
+
+population_values = [
+
+    int(
+        gdf[
+            f"POP_{year}"
+        ].sum()
+    )
+
+    for year in years
+
+]
+
+
+max_population = max(
+    population_values
+)
+
+
+trend_html = ""
+
+
+for year, value in zip(
+    years,
+    population_values
+):
+
+    if max_population > 0:
+
+        width = (
+            value /
+            max_population *
+            100
+        )
+
+    else:
+
+        width = 0
+
+
+    trend_html += f"""
+
+    <div class="trend-row">
+
+        <div class="trend-year">
+            {year}
+        </div>
+
+        <div class="trend-bg">
+
+            <div
+                class="trend-fill"
+                style="
+                width:{width}%;
+                "
+            ></div>
+
+        </div>
+
+        <div class="trend-value">
+            {value:,.0f}
+        </div>
+
+    </div>
+
+    """
+
+
+# ================================================================
+# 14. MAP HTML
+# ================================================================
+
+print("\n[10/12] Mengintegrasikan peta...")
+
+
+map_html = (
+    m.get_root()
+    .render()
+)
+
+
+map_srcdoc = html.escape(
+    map_html,
+    quote=True
+)
+
+
+# ================================================================
+# 15. DASHBOARD HTML
+# ================================================================
+
+print("\n[11/12] Membuat dashboard final...")
+
+
+dashboard = f"""
+
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1.0">
+
+<title>
+Bandung Demographic Atlas 2024
+</title>
+
+
+<style>
+
+
+/* =====================================================
+   GLOBAL
+===================================================== */
+
+* {{
+    box-sizing:border-box;
+}}
+
+
+body {{
+
+    margin:0;
+
+    background:#f3f6f9;
+
+    color:#172033;
+
+    font-family:
+    Arial,
+    Helvetica,
+    sans-serif;
+
+}}
+
+
+/* =====================================================
+   HEADER
+===================================================== */
+
+.header {{
+
+    background:
+    linear-gradient(
+        135deg,
+        #0f172a,
+        #1e293b
+    );
+
+    color:white;
+
+    padding:
+    34px 45px;
+
+    border-bottom:
+    4px solid #3182bd;
+
+}}
+
+
+.header-inner {{
+
+    max-width:1500px;
+
+    margin:auto;
+
+}}
+
+
+.header h1 {{
+
+    margin:0;
+
+    font-size:31px;
+
+    letter-spacing:-.6px;
+
+}}
+
+
+.header p {{
+
+    margin:
+    9px 0 0;
+
+    color:#cbd5e1;
+
+    font-size:14px;
+
+}}
+
+
+.badge {{
+
+    display:inline-block;
+
+    margin-top:14px;
+
+    padding:
+    6px 11px;
+
+    border-radius:20px;
+
+    background:
+    rgba(255,255,255,.1);
+
+    border:
+    1px solid
+    rgba(255,255,255,.18);
+
+    font-size:10px;
+
+    letter-spacing:.4px;
+
+}}
+
+
+/* =====================================================
+   CONTAINER
+===================================================== */
+
+.container {{
+
+    max-width:1500px;
+
+    margin:auto;
+
+    padding:
+    25px 35px 45px;
+
+}}
+
+
+/* =====================================================
+   KPI
+===================================================== */
+
+.kpi-grid {{
+
+    display:grid;
+
+    grid-template-columns:
+    repeat(4,1fr);
+
+    gap:18px;
+
+    margin-bottom:20px;
+
+}}
+
+
+.kpi {{
+
+    background:white;
+
+    border-radius:13px;
+
+    padding:21px;
+
+    border:
+    1px solid #edf0f4;
+
+    box-shadow:
+    0 3px 15px
+    rgba(15,23,42,.07);
+
+}}
+
+
+.kpi-label {{
+
+    color:#64748b;
+
+    font-size:11px;
+
+    font-weight:700;
+
+    letter-spacing:.6px;
+
+}}
+
+
+.kpi-value {{
+
+    margin-top:8px;
+
+    font-size:25px;
+
+    font-weight:700;
+
+    color:#0f172a;
+
+}}
+
+
+.kpi-desc {{
+
+    margin-top:5px;
+
+    color:#94a3b8;
+
+    font-size:11px;
+
+}}
+
+
+/* =====================================================
+   MAIN
+===================================================== */
+
+.main-grid {{
+
+    display:grid;
+
+    grid-template-columns:
+    minmax(0,2.2fr)
+    minmax(320px,.8fr);
+
+    gap:20px;
+
+}}
+
+
+.card {{
+
+    background:white;
+
+    border-radius:13px;
+
+    overflow:hidden;
+
+    border:
+    1px solid #edf0f4;
+
+    box-shadow:
+    0 3px 15px
+    rgba(15,23,42,.07);
+
+}}
+
+
+.card-header {{
+
+    padding:
+    17px 20px;
+
+    border-bottom:
+    1px solid #edf0f4;
+
+}}
+
+
+.card-header h2 {{
+
+    margin:0;
+
+    font-size:16px;
+
+}}
+
+
+.card-header p {{
+
+    margin:
+    5px 0 0;
+
+    color:#64748b;
+
+    font-size:11px;
+
+}}
+
+
+/* =====================================================
+   MAP
+===================================================== */
+
+.map-wrapper {{
+
+    width:100%;
+
+    height:700px;
+
+    overflow:hidden;
+
+}}
+
+
+.map-frame {{
+
+    width:100%;
+
+    height:100%;
+
+    border:0;
+
+    display:block;
+
+}}
+
+
+/* =====================================================
+   RANKING
+===================================================== */
+
+.rank-item {{
+
+    display:flex;
+
+    align-items:center;
+
+    padding:
+    12px 17px;
+
+    border-bottom:
+    1px solid #f1f5f9;
+
+}}
+
+
+.rank-number {{
+
+    width:29px;
+
+    height:29px;
+
+    flex:0 0 29px;
+
+    display:flex;
+
+    align-items:center;
+
+    justify-content:center;
+
+    border-radius:50%;
+
+    background:#eff6ff;
+
+    color:#1d4ed8;
+
+    font-weight:700;
+
+    font-size:11px;
+
+    margin-right:10px;
+
+}}
+
+
+.rank-info {{
+
+    flex:1;
+
+    min-width:0;
+
+}}
+
+
+.rank-desa {{
+
+    font-size:12px;
+
+    font-weight:700;
+
+    white-space:nowrap;
+
+    overflow:hidden;
+
+    text-overflow:ellipsis;
+
+}}
+
+
+.rank-kec {{
+
+    margin-top:3px;
+
+    color:#94a3b8;
+
+    font-size:10px;
+
+}}
+
+
+.rank-density {{
+
+    text-align:right;
+
+    color:#1d4ed8;
+
+    font-size:11px;
+
+    font-weight:700;
+
+}}
+
+
+.rank-density small {{
+
+    display:block;
+
+    color:#94a3b8;
+
+    font-size:8px;
+
+    font-weight:400;
+
+}}
+
+
+/* =====================================================
+   BOTTOM
+===================================================== */
+
+.bottom-grid {{
+
+    display:grid;
+
+    grid-template-columns:
+    repeat(3,1fr);
+
+    gap:20px;
+
+    margin-top:20px;
+
+}}
+
+
+/* =====================================================
+   GENDER
+===================================================== */
+
+.gender-item {{
+
+    margin-bottom:18px;
+
+}}
+
+
+.gender-label {{
+
+    display:flex;
+
+    justify-content:space-between;
+
+    font-size:12px;
+
+    margin-bottom:6px;
+
+}}
+
+
+.gender-bg {{
+
+    height:10px;
+
+    background:#e2e8f0;
+
+    border-radius:10px;
+
+    overflow:hidden;
+
+}}
+
+
+.gender-fill {{
+
+    height:100%;
+
+    background:#3182bd;
+
+    border-radius:10px;
+
+}}
+
+
+/* =====================================================
+   TREND
+===================================================== */
+
+.trend-row {{
+
+    display:grid;
+
+    grid-template-columns:
+    40px 1fr 85px;
+
+    align-items:center;
+
+    gap:8px;
+
+    margin-bottom:12px;
+
+}}
+
+
+.trend-year {{
+
+    font-size:11px;
+
+    font-weight:700;
+
+}}
+
+
+.trend-bg {{
+
+    height:9px;
+
+    background:#e8edf3;
+
+    border-radius:10px;
+
+    overflow:hidden;
+
+}}
+
+
+.trend-fill {{
+
+    height:100%;
+
+    background:#3182bd;
+
+    border-radius:10px;
+
+}}
+
+
+.trend-value {{
+
+    text-align:right;
+
+    color:#64748b;
+
+    font-size:10px;
+
+}}
+
+
+/* =====================================================
+   STAT
+===================================================== */
+
+.stat-number {{
+
+    margin:
+    8px 0;
+
+    font-size:29px;
+
+    font-weight:700;
+
+    color:#0f172a;
+
+}}
+
+
+.stat-label {{
+
+    color:#64748b;
+
+    font-size:11px;
+
+    line-height:1.5;
+
+}}
+
+
+/* =====================================================
+   FOOTER
+===================================================== */
+
+.footer {{
+
+    margin-top:28px;
+
+    padding:18px;
+
+    text-align:center;
+
+    color:#94a3b8;
+
+    font-size:10px;
+
+}}
+
+
+/* =====================================================
+   RESPONSIVE
+===================================================== */
+
+@media(max-width:1100px) {{
+
+    .kpi-grid {{
+
+        grid-template-columns:
+        repeat(2,1fr);
+
+    }}
+
+    .main-grid {{
+
+        grid-template-columns:
+        1fr;
+
+    }}
+
+    .bottom-grid {{
+
+        grid-template-columns:
+        1fr;
+
+    }}
+
+}}
+
+
+@media(max-width:650px) {{
+
+    .container {{
+
+        padding:
+        15px;
+
+    }}
+
+    .header {{
+
+        padding:
+        25px 20px;
+
+    }}
+
+    .header h1 {{
+
+        font-size:23px;
+
+    }}
+
+    .kpi-grid {{
+
+        grid-template-columns:
+        1fr;
+
+    }}
+
+    .map-wrapper {{
+
+        height:550px;
+
+    }}
+
+}}
+
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<!-- =====================================================
+     HEADER
+===================================================== -->
+
+<div class="header">
+
+<div class="header-inner">
+
+<h1>
+Bandung Demographic Atlas 2024
+</h1>
+
+<p>
+Interactive GIS Dashboard — Population & Demographic Analysis
+</p>
+
+<div class="badge">
+GIS PORTFOLIO • GEOSPATIAL DATA ANALYSIS
+</div>
+
+</div>
+
+</div>
+
+
+<div class="container">
+
+
+<!-- =====================================================
+     KPI
+===================================================== -->
+
+<div class="kpi-grid">
+
+
+<div class="kpi">
+
+<div class="kpi-label">
+TOTAL PENDUDUK
+</div>
+
+<div class="kpi-value">
+{TOTAL_POP:,.0f}
+</div>
+
+<div class="kpi-desc">
+Penduduk tahun 2024
+</div>
+
+</div>
+
+
+<div class="kpi">
+
+<div class="kpi-label">
+TOTAL KEPALA KELUARGA
+</div>
+
+<div class="kpi-value">
+{TOTAL_KK:,.0f}
+</div>
+
+<div class="kpi-desc">
+Jumlah KK
+</div>
+
+</div>
+
+
+<div class="kpi">
+
+<div class="kpi-label">
+RATA-RATA KEPADATAN
+</div>
+
+<div class="kpi-value">
+{AVG_DENSITY:,.0f}
+</div>
+
+<div class="kpi-desc">
+Jiwa per km²
+</div>
+
+</div>
+
+
+<div class="kpi">
+
+<div class="kpi-label">
+PERTUMBUHAN PENDUDUK
+</div>
+
+<div class="kpi-value">
+{AVG_GROWTH:.2f}%
+</div>
+
+<div class="kpi-desc">
+Periode 2020–2024
+</div>
+
+</div>
+
+
+</div>
+
+
+<!-- =====================================================
+     MAP + RANKING
+===================================================== -->
+
+<div class="main-grid">
+
+
+<div class="card">
+
+<div class="card-header">
+
+<h2>
+Spatial Distribution of Population Density
+</h2>
+
+<p>
+Gunakan Layer Control untuk memilih Light Map,
+OpenStreetMap atau Google Satellite
+</p>
+
+</div>
+
+
+<div class="map-wrapper">
+
+<iframe
+class="map-frame"
+srcdoc="{map_srcdoc}">
+</iframe>
+
+</div>
+
+</div>
+
+
+<div class="card">
+
+<div class="card-header">
+
+<h2>
+Top 10 Wilayah Terpadat
+</h2>
+
+<p>
+Berdasarkan kepadatan penduduk 2024
+</p>
+
+</div>
+
+
+<div>
+
+{top10_html}
+
+</div>
+
+</div>
+
+
+</div>
+
+
+<!-- =====================================================
+     BOTTOM ANALYSIS
+===================================================== -->
+
+<div class="bottom-grid">
+
+
+<!-- GENDER -->
+
+<div class="card">
+
+<div class="card-header">
+
+<h2>
+Population by Gender
+</h2>
+
+<p>
+Komposisi penduduk tahun 2024
+</p>
+
+</div>
+
+
+<div style="
+padding:20px;
+">
+
+
+<div class="gender-item">
+
+<div class="gender-label">
+
+<span>
+Laki-laki
+</span>
+
+<b>
+{MALE_PERCENT:.1f}%
+</b>
+
+</div>
+
+<div class="gender-bg">
+
+<div
+class="gender-fill"
+style="
+width:{MALE_PERCENT}%;
+">
+</div>
+
+</div>
+
+</div>
+
+
+<div class="gender-item">
+
+<div class="gender-label">
+
+<span>
+Perempuan
+</span>
+
+<b>
+{FEMALE_PERCENT:.1f}%
+</b>
+
+</div>
+
+<div class="gender-bg">
+
+<div
+class="gender-fill"
+style="
+width:{FEMALE_PERCENT}%;
+">
+</div>
+
+</div>
+
+</div>
+
+
+</div>
+
+</div>
+
+
+<!-- TREND -->
+
+<div class="card">
+
+<div class="card-header">
+
+<h2>
+Population Trend
+</h2>
+
+<p>
+Perubahan jumlah penduduk 2020–2024
+</p>
+
+</div>
+
+
+<div style="
+padding:20px;
+">
+
+{trend_html}
+
+</div>
+
+</div>
+
+
+<!-- SUMMARY -->
+
+<div class="card">
+
+<div class="card-header">
+
+<h2>
+Spatial Summary
+</h2>
+
+<p>
+Ringkasan analisis geospasial
+</p>
+
+</div>
+
+
+<div style="
+padding:20px;
+">
+
+
+<div class="stat-number">
+{len(gdf)}
+</div>
+
+<div class="stat-label">
+
+Desa/Kelurahan
+yang dianalisis
+
+</div>
+
+
+<hr style="
+border:0;
+border-top:
+1px solid #edf0f4;
+margin:18px 0;
+">
+
+
+<div class="stat-number">
+{AVG_GROWTH:.2f}%
+</div>
+
+<div class="stat-label">
+
+Rata-rata pertumbuhan
+penduduk 2020–2024
+
+</div>
+
+
+<hr style="
+border:0;
+border-top:
+1px solid #edf0f4;
+margin:18px 0;
+">
+
+
+<div class="stat-number">
+{TOTAL_POP:,.0f}
+</div>
+
+<div class="stat-label">
+
+Total penduduk
+tahun 2024
+
+</div>
+
+
+</div>
+
+</div>
+
+
+</div>
+
+
+<!-- =====================================================
+     FOOTER
+===================================================== -->
+
+<div class="footer">
+
+<b>
+Bandung Demographic Atlas 2024
+</b>
+
+<br>
+
+Interactive GIS Portfolio Project
+|
+Data Source: GeoMAPID
+|
+Population & Spatial Analysis
+
+</div>
+
+
+</div>
+
+
+</body>
+
+</html>
+
+"""
+
+
+# ================================================================
+# 16. SAVE
+# ================================================================
+
+print("\n[12/12] Menyimpan file...")
+
+
+output_file = (
+    "/content/"
+    "Bandung_Demographic_Atlas_2024_FINAL.html"
+)
+
+
+with open(
+    output_file,
+    "w",
+    encoding="utf-8"
+) as f:
+
+    f.write(
+        dashboard
+    )
+
+
+# ================================================================
+# 17. FINAL RESULT
+# ================================================================
+
+print("\n")
+print("=" * 75)
+print(" ✅ DASHBOARD BERHASIL DIBUAT")
+print("=" * 75)
+
+print()
+print("Jumlah wilayah  :", len(gdf))
+print(
+    "Total penduduk  :",
+    f"{TOTAL_POP:,.0f}"
+)
+print(
+    "Total KK        :",
+    f"{TOTAL_KK:,.0f}"
+)
+print(
+    "Avg density     :",
+    f"{AVG_DENSITY:,.0f}",
+    "jiwa/km²"
+)
+print(
+    "Avg growth      :",
+    f"{AVG_GROWTH:.2f}%"
+)
+
+print()
+print("File:")
+print(output_file)
+
+print()
+print("Dashboard sedang ditampilkan...")
+
+
+# ================================================================
+# 18. DISPLAY
+# ================================================================
+
+display(
+    HTML(
+        dashboard
+    )
+)
+
+
+# ================================================================
+# 19. DOWNLOAD
+# ================================================================
+
+print("\n✓ Downloading HTML...")
+
+files.download(
+    output_file
+)
+
+print("\n✓ SELESAI")
